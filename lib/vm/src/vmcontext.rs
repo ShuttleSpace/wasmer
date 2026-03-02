@@ -745,6 +745,10 @@ impl VMBuiltinFunctionsArray {
             wasmer_vm_data_drop as *const () as usize;
         ptrs[VMBuiltinFunctionIndex::get_raise_trap_index().index() as *const () as usize] =
             wasmer_vm_raise_trap as *const () as usize;
+        ptrs[VMBuiltinFunctionIndex::get_alloc_exception_index().index() as usize] =
+            wasmer_vm_alloc_exception as *const () as usize;
+        ptrs[VMBuiltinFunctionIndex::get_throw_index().index() as usize] =
+            wasmer_vm_throw as *const () as usize;
         ptrs[VMBuiltinFunctionIndex::get_table_size_index().index() as *const () as usize] =
             wasmer_vm_table_size as *const () as usize;
         ptrs[VMBuiltinFunctionIndex::get_imported_table_size_index().index() as *const ()

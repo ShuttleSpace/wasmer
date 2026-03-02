@@ -397,6 +397,8 @@ impl CompilerConfig for LLVM {
     fn supported_features_for_target(&self, _target: &Target) -> wasmer_types::Features {
         let mut feats = Features::default();
         feats.exceptions(true);
+        // Legacy exceptions are also supported
+        feats.legacy_exceptions(true);
         feats.relaxed_simd(true);
         feats.wide_arithmetic(true);
         feats.tail_call(true);

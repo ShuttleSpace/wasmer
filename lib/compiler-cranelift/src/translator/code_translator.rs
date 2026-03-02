@@ -604,15 +604,145 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
 
         /********************************** Exception handing **********************************/
-        Operator::Try { .. }
-        | Operator::Catch { .. }
-        | Operator::Rethrow { .. }
-        | Operator::Delegate { .. }
-        | Operator::CatchAll => {
-            return Err(wasm_unsupported!(
-                "proposed exception handling operator {:?}",
-                op
-            ));
+        Operator::Try { blockty } => {
+            // Legacy exception handling - create a try block with handler checkpoint
+            let body = builder.create_block();
+            let (params, results) = module_translation_state.blocktype_params_results(&blockty)?;
+            let next = block_with_params(builder, results.iter(), environ)?;
+            builder.ins().jump(body, &[]);
+            builder.seal_block(body);
+
+            // Create a handler checkpoint for legacy try block
+            let checkpoint = state.handlers.take_checkpoint();
+            state.push_try_table_block(next, Vec::new(), params.len(), results.len(), checkpoint);
+
+            builder.switch_to_block(body);
+        }
+        Operator::Catch { tag_index } => {
+            // Legacy catch - create a catch block for the specified tag
+            let tag_idx = TagIndex::from_u32(*tag_index);
+            let tag_value = *tag_index as i32;
+
+            // Find the nearest try block (the one with try_table_info)
+            let try_frame = state
+                .control_stack
+                .iter_mut()
+                .rev()
+                .find(|frame| {
+                    matches!(
+                        frame,
+                        ControlStackFrame::Block {
+                            try_table_info: Some(_),
+                            ..
+                        }
+                    )
+                })
+                .ok_or_else(|| wasm_unsupported!("catch without try block"))?;
+
+            // Create catch block
+            let catch_block = builder.create_block();
+            let exnref = builder.append_block_param(catch_block, EXN_REF_TYPE);
+
+            builder.switch_to_block(catch_block);
+
+            // Extract payload from exception
+            let mut params = SmallVec::<[Value; 4]>::new();
+            params.extend(environ.translate_exn_unbox(builder, tag_idx, exnref)?);
+
+            // Jump to the destination after catch
+            let destination = try_frame.br_destination();
+            try_frame.set_branched_to_exit();
+            canonicalise_then_jump(builder, destination, params.as_slice());
+
+            // Add catch clause to handler state
+            state.handlers.add_clause(CatchClause {
+                wasm_tag: Some(*tag_index),
+                tag_value,
+                block: catch_block,
+            });
+
+            // The builder will be switched back to the correct block by subsequent instructions
+        }
+        Operator::Rethrow { relative_depth: _ } => {
+            // Legacy rethrow - rethrow the exception caught at the specified depth
+            // In legacy exception handling, rethrow operates on the exception caught by a catch clause
+            // The exception reference should be on the stack (pushed by catch)
+
+            // Pop the exception reference from the stack
+            let exnref = state.pop1();
+
+            // Rethrow the exception using the existing landing pad
+            environ.translate_exn_throw_ref(builder, exnref, state.handlers.landing_pad())?;
+
+            // After rethrow, code is unreachable
+            state.reachable = false;
+        }
+        Operator::Delegate { relative_depth } => {
+            // Legacy delegate - delegate exception handling to an outer handler
+            // This is similar to end, but it also removes the current try block's handlers
+
+            // Find the target frame to delegate to
+            let target_depth = state.control_stack.len() - 1 - (*relative_depth as usize);
+            let target_frame = &state.control_stack[target_depth];
+
+            // Restore the handler state checkpoint to the target frame
+            if let ControlStackFrame::Block {
+                try_table_info: Some((checkpoint, _)),
+                ..
+            } = target_frame
+            {
+                state.handlers.restore_checkpoint(*checkpoint);
+            }
+
+            // Pop the current frame and all frames up to the target
+            while state.control_stack.len() > target_depth + 1 {
+                state.pop1();
+            }
+
+            // The exception will be propagated to the outer handler
+            state.reachable = false;
+        }
+        Operator::CatchAll => {
+            // Legacy catch_all - create a catch block for all exceptions
+            // Find the nearest try block (the one with try_table_info)
+            let try_frame = state
+                .control_stack
+                .iter_mut()
+                .rev()
+                .find(|frame| {
+                    matches!(
+                        frame,
+                        ControlStackFrame::Block {
+                            try_table_info: Some(_),
+                            ..
+                        }
+                    )
+                })
+                .ok_or_else(|| wasm_unsupported!("catch_all without try block"))?;
+
+            // Create catch block
+            let catch_block = builder.create_block();
+            let exnref = builder.append_block_param(catch_block, EXN_REF_TYPE);
+
+            builder.switch_to_block(catch_block);
+
+            // Catch all exceptions - don't extract payload, just get the exnref
+            let mut params = SmallVec::<[Value; 4]>::new();
+            params.push(exnref);
+
+            // Jump to the destination after catch
+            let destination = try_frame.br_destination();
+            try_frame.set_branched_to_exit();
+            canonicalise_then_jump(builder, destination, params.as_slice());
+
+            // Add catch clause to handler state with CATCH_ALL_TAG_VALUE
+            state.handlers.add_clause(CatchClause {
+                wasm_tag: None,
+                tag_value: CATCH_ALL_TAG_VALUE,
+                block: catch_block,
+            });
+
+            // The builder will be switched back to the correct block by subsequent instructions
         }
         Operator::TryTable { try_table } => {
             let body = builder.create_block();

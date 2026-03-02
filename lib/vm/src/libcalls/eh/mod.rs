@@ -5,7 +5,10 @@ use crate::{InternalStoreHandle, VMContext, VMExceptionObj};
 mod dwarf;
 
 cfg_if::cfg_if! {
-    if #[cfg(any(target_env = "msvc", target_family = "wasm"))] {
+    if #[cfg(target_env = "msvc")] {
+        mod msvc_seh;
+        pub use msvc_seh::*;
+    } else if #[cfg(target_family = "wasm")] {
         /// The implementation of Wasmer's personality function.
         ///
         /// # Safety

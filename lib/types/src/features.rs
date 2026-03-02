@@ -34,6 +34,9 @@ pub struct Features {
     pub memory64: bool,
     /// Wasm exceptions proposal should be enabled
     pub exceptions: bool,
+    /// Legacy Wasm exceptions proposal (Phase 1) should be enabled
+    /// This enables the legacy try, catch, rethrow, delegate, and catch_all operators
+    pub legacy_exceptions: bool,
     /// Relaxed SIMD proposal should be enabled
     pub relaxed_simd: bool,
     /// Extended constant expressions proposal should be enabled
@@ -60,6 +63,7 @@ impl Features {
             multi_memory: false,
             memory64: false,
             exceptions: false,
+            legacy_exceptions: false,
             relaxed_simd: false,
             wide_arithmetic: false,
             // Extended Constant Expressions should be on by default
@@ -80,6 +84,7 @@ impl Features {
             multi_memory: true,
             memory64: true,
             exceptions: true,
+            legacy_exceptions: true,
             relaxed_simd: true,
             extended_const: true,
             wide_arithmetic: true,
@@ -99,6 +104,7 @@ impl Features {
             multi_memory: false,
             memory64: false,
             exceptions: false,
+            legacy_exceptions: false,
             relaxed_simd: false,
             extended_const: false,
             wide_arithmetic: false,
@@ -337,22 +343,66 @@ impl Features {
         self
     }
 
+    /// Configures whether the WebAssembly legacy exception-handling proposal (Phase 1) will be enabled.
+    ///
+    /// The legacy exception handling uses the older try/catch/rethrow/delegate/catch_all operators
+    /// which are different from the newer try_table approach.
+    ///
+    /// This is `false` by default.
+    ///
+    /// [eh]: https://github.com/webassembly/exception-handling
+    pub fn legacy_exceptions(&mut self, enable: bool) -> &mut Self {
+        self.legacy_exceptions = enable;
+        self
+    }
+
     /// Checks if this features set contains all the features required by another set
-    pub fn contains_features(&self, required: &Self) -> bool {
-        // Check all required features
-        (!required.simd || self.simd)
-            && (!required.bulk_memory || self.bulk_memory)
-            && (!required.reference_types || self.reference_types)
-            && (!required.threads || self.threads)
-            && (!required.multi_value || self.multi_value)
-            && (!required.exceptions || self.exceptions)
-            && (!required.tail_call || self.tail_call)
-            && (!required.module_linking || self.module_linking)
-            && (!required.multi_memory || self.multi_memory)
-            && (!required.memory64 || self.memory64)
-            && (!required.relaxed_simd || self.relaxed_simd)
-            && (!required.extended_const || self.extended_const)
-            && (!required.wide_arithmetic || self.wide_arithmetic)
+    pub fn contains_features(&self, required: &Self) -> (bool, Vec<&str>) {
+        let mut unsupported = Vec::new();
+
+        if required.simd && !self.simd {
+            unsupported.push("simd");
+        }
+        if required.bulk_memory && !self.bulk_memory {
+            unsupported.push("bulk_memory");
+        }
+        if required.reference_types && !self.reference_types {
+            unsupported.push("reference_types");
+        }
+        if required.threads && !self.threads {
+            unsupported.push("threads");
+        }
+        if required.multi_value && !self.multi_value {
+            unsupported.push("multi_value");
+        }
+        if required.exceptions && !self.exceptions {
+            unsupported.push("exceptions");
+        }
+        if required.legacy_exceptions && !self.legacy_exceptions {
+            unsupported.push("legacy_exceptions");
+        }
+        if required.tail_call && !self.tail_call {
+            unsupported.push("tail_call");
+        }
+        if required.module_linking && !self.module_linking {
+            unsupported.push("module_linking");
+        }
+        if required.multi_memory && !self.multi_memory {
+            unsupported.push("multi_memory");
+        }
+        if required.memory64 && !self.memory64 {
+            unsupported.push("memory64");
+        }
+        if required.relaxed_simd && !self.relaxed_simd {
+            unsupported.push("relaxed_simd");
+        }
+        if required.extended_const && !self.extended_const {
+            unsupported.push("extended_const");
+        }
+        if required.wide_arithmetic  && !required.wide_arithmetic {
+            unsupported.push("wide_arithmetic");
+        }
+        (unsupported.is_empty(), unsupported)
     }
 
     #[cfg(feature = "detect-wasm-features")]
@@ -374,114 +424,151 @@ impl Features {
     pub fn detect_from_wasm(wasm_bytes: &[u8]) -> Result<Self, wasmparser::BinaryReaderError> {
         let mut features = Self::default();
 
-        // Simple test for exceptions - try to validate with exceptions disabled
-        let mut exceptions_test = WasmFeatures::default();
-        // Enable most features except exceptions
-        exceptions_test.set(WasmFeatures::BULK_MEMORY, true);
-        exceptions_test.set(WasmFeatures::REFERENCE_TYPES, true);
-        exceptions_test.set(WasmFeatures::SIMD, true);
-        exceptions_test.set(WasmFeatures::MULTI_VALUE, true);
-        exceptions_test.set(WasmFeatures::THREADS, true);
-        exceptions_test.set(WasmFeatures::TAIL_CALL, true);
-        exceptions_test.set(WasmFeatures::MULTI_MEMORY, true);
-        exceptions_test.set(WasmFeatures::MEMORY64, true);
-        exceptions_test.set(WasmFeatures::EXCEPTIONS, false);
+        // Parse the module to detect specific exception operators
+        let mut has_legacy_exception = false;
+        let mut has_try_table = false;
+        let mut has_throw = false;
 
-        let mut validator = Validator::new_with_features(exceptions_test);
-
-        if let Err(e) = validator.validate_all(wasm_bytes) {
-            let err_msg = e.to_string();
-            if err_msg.contains("exception") {
-                features.exceptions(true);
-            }
-        }
-
-        // Now try with all features enabled to catch anything we might have missed
-        let mut wasm_features = WasmFeatures::default();
-        wasm_features.set(WasmFeatures::EXCEPTIONS, true);
-        wasm_features.set(WasmFeatures::BULK_MEMORY, true);
-        wasm_features.set(WasmFeatures::REFERENCE_TYPES, true);
-        wasm_features.set(WasmFeatures::SIMD, true);
-        wasm_features.set(WasmFeatures::MULTI_VALUE, true);
-        wasm_features.set(WasmFeatures::THREADS, true);
-        wasm_features.set(WasmFeatures::TAIL_CALL, true);
-        wasm_features.set(WasmFeatures::MULTI_MEMORY, true);
-        wasm_features.set(WasmFeatures::MEMORY64, true);
-        wasm_features.set(WasmFeatures::RELAXED_SIMD, false);
-
-        let mut validator = Validator::new_with_features(wasm_features);
-        match validator.validate_all(wasm_bytes) {
-            Err(e) => {
-                // If validation fails due to missing feature support, check which feature it is
-                let err_msg = e.to_string().to_lowercase();
-
-                if err_msg.contains("exception") || err_msg.contains("try/catch") {
-                    features.exceptions(true);
-                }
-
-                if err_msg.contains("bulk memory") {
-                    features.bulk_memory(true);
-                }
-
-                if err_msg.contains("reference type") {
-                    features.reference_types(true);
-                }
-
-                if err_msg.contains("relaxed simd") {
-                    features.relaxed_simd(true);
-                } else if err_msg.contains("simd") {
-                    features.simd(true);
-                }
-
-                if err_msg.contains("multi value") || err_msg.contains("multiple values") {
-                    features.multi_value(true);
-                }
-
-                if err_msg.contains("thread") || err_msg.contains("shared memory") {
-                    features.threads(true);
-                }
-
-                if err_msg.contains("tail call") {
-                    features.tail_call(true);
-                }
-
-                if err_msg.contains("module linking") {
-                    features.module_linking(true);
-                }
-
-                if err_msg.contains("multi memory") {
-                    features.multi_memory(true);
-                }
-
-                if err_msg.contains("memory64") {
-                    features.memory64(true);
-                }
-                if err_msg.contains("wide arithmetic") {
-                    features.wide_arithmetic(true);
-                }
-                if err_msg.contains("constant expression") {
-                    features.extended_const(true);
-                }
-            }
-            Ok(_) => {
-                // The module validated successfully with all features enabled,
-                // which means it could potentially use any of them.
-                // We'll do a more detailed analysis by parsing the module.
-            }
-        }
-
-        // A simple pass to detect certain common patterns
         for payload in Parser::new(0).parse_all(wasm_bytes) {
             let payload = payload?;
-            if let Payload::CustomSection(section) = payload {
-                let name = section.name();
-                // Exception handling has a custom section
-                if name.contains("exception") {
-                    features.exceptions(true);
+            match payload {
+                Payload::CodeSectionEntry(reader) => {
+                    for operator in reader.get_operators_reader()? {
+                        let op = operator?;
+                        match op {
+                            wasmparser::Operator::Try { .. } => has_legacy_exception = true,
+                            wasmparser::Operator::Catch { .. } => has_legacy_exception = true,
+                            wasmparser::Operator::Rethrow { .. } => has_legacy_exception = true,
+                            wasmparser::Operator::Delegate { .. } => has_legacy_exception = true,
+                            wasmparser::Operator::CatchAll => has_legacy_exception = true,
+                            wasmparser::Operator::TryTable { .. } => has_try_table = true,
+                            wasmparser::Operator::Throw { .. } => has_throw = true,
+                            wasmparser::Operator::ThrowRef => has_throw = true,
+                            _ => {}
+                        }
+                    }
                 }
+                Payload::CustomSection(section) => {
+                    let name = section.name();
+                    // Exception handling has a custom section
+                    if name.contains("exception") {
+                        // If we have an exception custom section, check for legacy vs new
+                        // by looking at the operators we found
+                        if has_legacy_exception || has_try_table || has_throw {
+                            features.exceptions(true);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
+        // Set exception features based on what we found
+        if has_legacy_exception {
+            features.exceptions(true);
+            features.legacy_exceptions(true);
+        } else if has_try_table || has_throw {
+            features.exceptions(true);
+        }
+
+        // If we didn't detect any exception operators, fall back to the old validation-based method
+        if !has_legacy_exception && !has_try_table && !has_throw {
+            // Simple test for exceptions - try to validate with exceptions disabled
+            let mut exceptions_test = WasmFeatures::default();
+            // Enable most features except exceptions
+            exceptions_test.set(WasmFeatures::BULK_MEMORY, true);
+            exceptions_test.set(WasmFeatures::REFERENCE_TYPES, true);
+            exceptions_test.set(WasmFeatures::SIMD, true);
+            exceptions_test.set(WasmFeatures::MULTI_VALUE, true);
+            exceptions_test.set(WasmFeatures::THREADS, true);
+            exceptions_test.set(WasmFeatures::TAIL_CALL, true);
+            exceptions_test.set(WasmFeatures::MULTI_MEMORY, true);
+            exceptions_test.set(WasmFeatures::MEMORY64, true);
+            exceptions_test.set(WasmFeatures::EXCEPTIONS, false);
+
+            let mut validator = Validator::new_with_features(exceptions_test);
+
+            if let Err(e) = validator.validate_all(wasm_bytes) {
+                let err_msg = e.to_string();
+                if err_msg.contains("exception") {
+                    features.exceptions(true);
+                }
+            }
+
+            // Now try with all features enabled to catch anything we might have missed
+            let mut wasm_features = WasmFeatures::default();
+            wasm_features.set(WasmFeatures::EXCEPTIONS, true);
+            wasm_features.set(WasmFeatures::BULK_MEMORY, true);
+            wasm_features.set(WasmFeatures::REFERENCE_TYPES, true);
+            wasm_features.set(WasmFeatures::SIMD, true);
+            wasm_features.set(WasmFeatures::MULTI_VALUE, true);
+            wasm_features.set(WasmFeatures::THREADS, true);
+            wasm_features.set(WasmFeatures::TAIL_CALL, true);
+            wasm_features.set(WasmFeatures::MULTI_MEMORY, true);
+            wasm_features.set(WasmFeatures::MEMORY64, true);
+            wasm_features.set(WasmFeatures::RELAXED_SIMD, false);
+
+            let mut validator = Validator::new_with_features(wasm_features);
+            match validator.validate_all(wasm_bytes) {
+                Err(e) => {
+                    // If validation fails due to missing feature support, check which feature it is
+                    let err_msg = e.to_string().to_lowercase();
+
+                    if err_msg.contains("exception") || err_msg.contains("try/catch") {
+                        features.exceptions(true);
+                    }
+
+                    if err_msg.contains("bulk memory") {
+                        features.bulk_memory(true);
+                    }
+
+                    if err_msg.contains("reference type") {
+                        features.reference_types(true);
+                    }
+
+                    if err_msg.contains("relaxed simd") && !features.relaxed_simd {
+                        features.relaxed_simd(true);
+                    } else if err_msg.contains("simd") && !features.simd {
+                        features.simd(true);
+                    }
+
+                    if err_msg.contains("multi value") || err_msg.contains("multiple values") {
+                        features.multi_value(true);
+                    }
+
+                    if err_msg.contains("thread") || err_msg.contains("shared memory") {
+                        features.threads(true);
+                    }
+
+                    if err_msg.contains("tail call") {
+                        features.tail_call(true);
+                    }
+
+                    if err_msg.contains("module linking") {
+                        features.module_linking(true);
+                    }
+
+                    if err_msg.contains("multi memory") {
+                        features.multi_memory(true);
+                    }
+
+                    if err_msg.contains("memory64") {
+                        features.memory64(true);
+                    }
+                    if err_msg.contains("wide arithmetic") {
+                        features.wide_arithmetic(true);
+                    }
+                    if err_msg.contains("constant expression") {
+                        features.extended_const(true);
+                    }
+                }
+                Ok(_) => {
+                    // The module validated successfully with all features enabled,
+                    // which means it could potentially use any of them.
+                    // We'll do a more detailed analysis by parsing the module.
+                }
+            }
+        }
         Ok(features)
     }
 
@@ -502,6 +589,7 @@ impl Features {
             multi_memory,
             memory64,
             exceptions,
+            legacy_exceptions,
             relaxed_simd,
             extended_const,
             wide_arithmetic,
@@ -518,6 +606,7 @@ impl Features {
             multi_memory: self.multi_memory || multi_memory,
             memory64: self.memory64 || memory64,
             exceptions: self.exceptions || exceptions,
+            legacy_exceptions: self.legacy_exceptions || legacy_exceptions,
             relaxed_simd: self.relaxed_simd || relaxed_simd,
             extended_const: self.extended_const || extended_const,
             wide_arithmetic: self.wide_arithmetic || wide_arithmetic,
@@ -550,6 +639,7 @@ mod test_features {
                 multi_memory: false,
                 memory64: false,
                 exceptions: false,
+                legacy_exceptions: false,
                 relaxed_simd: false,
                 extended_const: true,
                 wide_arithmetic: false

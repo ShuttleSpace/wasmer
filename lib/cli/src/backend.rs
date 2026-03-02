@@ -737,13 +737,13 @@ impl BackendType {
 
         // Get the supported features from the backend
         let supported = wasmer::Engine::supported_features_for_backend(&backend_kind, target);
-
-        // Check if the backend supports all required features
-        if !supported.contains_features(required_features) {
-            return false;
+        let (contains, unsupported) = supported.contains_features(required_features);
+        
+        if !contains {
+            tracing::info!("Backend {:?} does not support features: {:?}", backend_kind, unsupported);
         }
 
-        true
+        contains
     }
 }
 

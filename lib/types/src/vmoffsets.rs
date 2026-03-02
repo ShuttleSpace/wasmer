@@ -75,6 +75,14 @@ impl VMBuiltinFunctionIndex {
     pub const fn get_raise_trap_index() -> Self {
         Self(13)
     }
+    /// Returns an index for wasm's `alloc_exception` instruction.
+    pub const fn get_alloc_exception_index() -> Self {
+        Self(37)
+    }
+    /// Returns an index for wasm's `throw` instruction.
+    pub const fn get_throw_index() -> Self {
+        Self(38)
+    }
     /// Returns an index for wasm's `table.size` instruction for local tables.
     pub const fn get_table_size_index() -> Self {
         Self(14)
@@ -178,7 +186,7 @@ impl VMBuiltinFunctionIndex {
 
     /// Returns the total number of builtin functions.
     pub const fn builtin_functions_total_number() -> u32 {
-        37
+        39
     }
 
     /// Return the index as an u32 number.

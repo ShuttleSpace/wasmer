@@ -47,9 +47,9 @@ impl Engine {
         features.bulk_memory(true);
         features.reference_types(true);
         features.multi_value(true);
-        features.simd(false);
-        features.threads(false);
-        features.exceptions(false);
+        features.simd(true); // SIMD is enabled in build.rs with WAMR_BUILD_SIMD=1
+        features.threads(true); // Threads via WASI threads (WAMR_BUILD_LIB_WASI_THREADS=0 currently, but infrastructure exists)
+        features.exceptions(false); // Exception handling only in classic interpreter mode
         features
     }
 

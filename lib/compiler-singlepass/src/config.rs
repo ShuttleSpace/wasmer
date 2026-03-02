@@ -129,8 +129,18 @@ impl CompilerConfig for Singlepass {
     }
 
     /// Gets the supported features for this compiler in the given target
-    fn supported_features_for_target(&self, _target: &Target) -> Features {
-        Features::default()
+    fn supported_features_for_target(&self, target: &Target) -> Features {
+        let mut feats = Features::default();
+        // Enable exceptions on Unix-like systems (same as Cranelift)
+        if !matches!(
+            target.triple().operating_system,
+            target_lexicon::OperatingSystem::Windows | target_lexicon::OperatingSystem::Uefi
+        ) {
+            feats.exceptions(true);
+            // Note: Legacy exceptions are not yet stable in Singlepass due to register management issues
+            // Use Cranelift or LLVM for modules requiring legacy exception support
+        }
+        feats
     }
 
     /// Pushes a middleware onto the back of the middleware chain.

@@ -93,7 +93,7 @@ fn build_wamr() {
         .define("WAMR_BUILD_SIMD", "1")
         .define("WAMR_BUILD_FAST_INTERP", "1")
         .define("WAMR_BUILD_LIB_PTHREAD", "1")
-        .define("WAMR_BUILD_LIB_WASI_THREADS", "0")
+        .define("WAMR_BUILD_LIB_WASI_THREADS", "1")  // Enable WASI threads support
         .define("WAMR_BUILD_LIBC_WASI", "0")
         .define("WAMR_BUILD_LIBC_BUILTIN", "0")
         .define("WAMR_BUILD_SHARED_MEMORY", "1")

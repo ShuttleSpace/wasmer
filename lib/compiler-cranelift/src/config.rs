@@ -302,8 +302,15 @@ impl CompilerConfig for Cranelift {
 
     fn supported_features_for_target(&self, target: &Target) -> wasmer_types::Features {
         let mut feats = Features::default();
-        if target.triple().operating_system == OperatingSystem::Linux {
+        // Enable exceptions on Unix-like systems (Linux, macOS, BSD, etc.)
+        // Windows support requires SEH implementation
+        if !matches!(
+            target.triple().operating_system,
+            OperatingSystem::Windows | OperatingSystem::Uefi
+        ) {
             feats.exceptions(true);
+            // Legacy exceptions are also supported on the same platforms as exceptions
+            feats.legacy_exceptions(true);
         }
         feats.relaxed_simd(true);
         feats.wide_arithmetic(true);
