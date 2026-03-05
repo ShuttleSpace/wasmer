@@ -7,6 +7,7 @@
   (func (import "wasix_32v1" "clock_time_get") (param i32 i64 i32) (result i32))
   (func (import "wasix_32v1" "fd_advise") (param i32 i64 i64 i32) (result i32))
   (func (import "wasix_32v1" "fd_allocate") (param i32 i64 i64) (result i32))
+  (func (import "wasix_32v1" "fd_flock") (param i32 i32) (result i32))
   (func (import "wasix_32v1" "fd_close") (param i32) (result i32))
   (func (import "wasix_32v1" "fd_datasync") (param i32) (result i32))
   (func (import "wasix_32v1" "fd_fdstat_get") (param i32 i32) (result i32))

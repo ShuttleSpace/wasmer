@@ -121,6 +121,15 @@ pub(crate) struct WasiFutexState {
     pub futexes: HashMap<u64, WasiFutex>,
 }
 
+/// Advisory file lock state for a single inode (intra-process tracking)
+#[derive(Debug, Default, Clone)]
+pub(crate) struct FileLockState {
+    /// F_UNLCK=0, F_RDLCK=1, F_WRLCK=2
+    pub lock_type: i16,
+    /// Number of shared-lock holders
+    pub readers: u32,
+}
+
 /// Top level data type containing all* the state with which WASI can
 /// interact.
 ///
@@ -139,6 +148,10 @@ pub(crate) struct WasiState {
     pub args: Mutex<Vec<String>>,
     pub envs: Mutex<Vec<Vec<u8>>>,
     pub signals: Mutex<HashMap<Signal, Disposition>>,
+
+    /// Advisory file lock table keyed by inode number (intra-process)
+    #[cfg_attr(feature = "enable-serde", serde(skip))]
+    pub file_locks: Mutex<HashMap<u64, FileLockState>>,
 
     // TODO: should not be here, since this requires active work to resolve.
     // State should only hold active runtime state that can be reproducibly re-created.
@@ -262,6 +275,7 @@ impl WasiState {
             args: Mutex::new(self.args.lock().unwrap().clone()),
             envs: Mutex::new(self.envs.lock().unwrap().clone()),
             signals: Mutex::new(self.signals.lock().unwrap().clone()),
+            file_locks: Default::default(),
             preopen: self.preopen.clone(),
         }
     }

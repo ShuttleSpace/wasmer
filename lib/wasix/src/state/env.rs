@@ -102,6 +102,7 @@ impl WasiEnvInit {
                 envs: std::sync::Mutex::new(self.state.envs.lock().unwrap().deref().clone()),
                 signals: std::sync::Mutex::new(self.state.signals.lock().unwrap().deref().clone()),
                 preopen: self.state.preopen.clone(),
+                file_locks: std::sync::Mutex::new(self.state.file_locks.lock().unwrap().clone()),
             },
             runtime: self.runtime.clone(),
             webc_dependencies: self.webc_dependencies.clone(),

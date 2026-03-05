@@ -990,6 +990,7 @@ impl WasiEnvBuilder {
             clock_offset: Default::default(),
             envs: std::sync::Mutex::new(conv_env_vars(self.envs)),
             signals: std::sync::Mutex::new(self.signals.iter().map(|s| (s.sig, s.disp)).collect()),
+            file_locks: Default::default(),
         };
 
         let runtime = self.runtime.unwrap_or_else(|| {
