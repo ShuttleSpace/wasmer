@@ -215,7 +215,7 @@ fn apply_relocation(
 
             let delta = delta as isize;
             assert!(
-                ((-1 << 32)..(1 << 32)).contains(&delta),
+                ((-1_i64 << 32)..(1_i64 << 32)).contains(&(delta as i64)),
                 "can't generate page-relative relocation with ±4GB `adrp` instruction"
             );
 

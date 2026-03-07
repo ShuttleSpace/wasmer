@@ -29,7 +29,9 @@ pub fn platform_clock_res_get(
         (clock_getres(unix_clock_id, &mut timespec_out), timespec_out)
     };
 
-    let t_out = (timespec_out.tv_sec * 1_000_000_000).wrapping_add(timespec_out.tv_nsec);
+    let t_out = (timespec_out.tv_sec as i64)
+        .wrapping_mul(1_000_000_000)
+        .wrapping_add(timespec_out.tv_nsec as i64);
     Ok(t_out)
 }
 
@@ -56,6 +58,8 @@ pub fn platform_clock_time_get(
         )
     };
 
-    let t_out = (timespec_out.tv_sec * 1_000_000_000).wrapping_add(timespec_out.tv_nsec);
+    let t_out = (timespec_out.tv_sec as i64)
+        .wrapping_mul(1_000_000_000)
+        .wrapping_add(timespec_out.tv_nsec as i64);
     Ok(t_out)
 }
