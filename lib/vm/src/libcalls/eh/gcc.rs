@@ -90,6 +90,9 @@ impl UwExceptionWrapper {
 #[cfg(target_arch = "x86_64")]
 const UNWIND_DATA_REG: (i32, i32) = (0, 1); // RAX, RDX
 
+#[cfg(target_arch = "x86")]
+const UNWIND_DATA_REG: (i32, i32) = (0, 2); // EAX, EDX
+
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 const UNWIND_DATA_REG: (i32, i32) = (0, 1); // R0, R1 / X0, X1
 
