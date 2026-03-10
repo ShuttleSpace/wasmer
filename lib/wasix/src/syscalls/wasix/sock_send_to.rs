@@ -29,27 +29,49 @@ pub fn sock_send_to<M: MemorySize>(
 ) -> Result<Errno, WasiError> {
     WasiEnv::do_pending_operations(&mut ctx)?;
 
-    let env = ctx.data();
-    let memory = unsafe { env.memory_view(&ctx) };
-    let iovs_arr = wasi_try_mem_ok!(si_data.slice(&memory, si_data_len));
-
-    let (addr_ip, addr_port) = {
+    let (addr_ip, addr_port, use_write, enable_journal) = {
+        let env = ctx.data();
         let memory = unsafe { env.memory_view(&ctx) };
-        wasi_try_ok!(read_ip_port(&memory, addr))
+        let (addr_ip, addr_port) = wasi_try_ok!(read_ip_port(&memory, addr));
+        let fd_entry = wasi_try_ok!(env.state.fs.get_fd(sock));
+        let guard = fd_entry.inode.read();
+        let use_write = matches!(guard.deref(), Kind::DuplexPipe { .. });
+        drop(guard);
+        (addr_ip, addr_port, use_write, env.enable_journal)
     };
     let addr = SocketAddr::new(addr_ip, addr_port);
     Span::current().record("addr", format!("{addr:?}"));
 
-    let bytes_written = wasi_try_ok!(sock_send_to_internal(
-        &mut ctx,
-        sock,
-        FdWriteSource::Iovs {
-            iovs: si_data,
-            iovs_len: si_data_len
-        },
-        si_flags,
-        addr,
-    )?);
+    let bytes_written = if use_write {
+        let offset = {
+            let env = ctx.data();
+            let state = env.state.clone();
+            let fd_entry = wasi_try_ok!(state.fs.get_fd(sock));
+            fd_entry.inner.offset.load(Ordering::Acquire) as usize
+        };
+        wasi_try_ok!(fd_write_internal::<M>(
+            &mut ctx,
+            sock,
+            FdWriteSource::Iovs {
+                iovs: si_data,
+                iovs_len: si_data_len
+            },
+            offset as u64,
+            true,
+            enable_journal
+        )?)
+    } else {
+        wasi_try_ok!(sock_send_to_internal(
+            &mut ctx,
+            sock,
+            FdWriteSource::Iovs {
+                iovs: si_data,
+                iovs_len: si_data_len
+            },
+            si_flags,
+            addr,
+        )?)
+    };
 
     #[cfg(feature = "journal")]
     if ctx.data().enable_journal {

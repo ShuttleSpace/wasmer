@@ -29,6 +29,25 @@ pub fn sock_recv_from<M: MemorySize>(
 ) -> Result<Errno, WasiError> {
     WasiEnv::do_pending_operations(&mut ctx)?;
 
+    let env = ctx.data();
+    let fd_entry = wasi_try_ok!(env.state.fs.get_fd(sock));
+    let guard = fd_entry.inode.read();
+    // socketpair() is currently backed by DuplexPipe; treat it like a connected socket.
+    let use_read = matches!(guard.deref(), Kind::DuplexPipe { .. });
+    drop(guard);
+    if use_read {
+        let env = ctx.data();
+        let memory = unsafe { env.memory_view(&ctx) };
+        wasi_try_mem_ok!(ro_flags.write(&memory, 0));
+        wasi_try_ok!(write_ip_port(
+            &memory,
+            ro_addr,
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            0
+        ));
+        return fd_read(ctx, sock, ri_data, ri_data_len, ro_data_len);
+    }
+
     sock_recv_from_internal(
         ctx,
         sock,
