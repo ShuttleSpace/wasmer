@@ -935,3 +935,53 @@ pub(crate) fn flatten_runtime_error(err: RuntimeError) -> RuntimeError {
         _ => err,
     }
 }
+
+#[cfg(test)]
+mod eh_import_tests {
+    use super::inject_eh_sjlj_tags;
+    use wasmer::{Extern, Store, Type};
+    use wasmer_types::TagKind;
+
+    #[test]
+    fn defines_cpp_and_longjmp_exception_tags() {
+        let mut store = Store::default();
+        let mut imports = wasmer::Imports::new();
+
+        inject_eh_sjlj_tags(&mut imports, &mut store);
+
+        for name in ["__c_longjmp", "__cpp_exception"] {
+            let ext = imports
+                .get_export("env", name)
+                .unwrap_or_else(|| panic!("missing env.{name} import"));
+
+            let tag = match ext {
+                Extern::Tag(tag) => tag,
+                other => panic!("env.{name} must be a tag, got {other:?}"),
+            };
+
+            let ty = tag.ty(&store);
+            assert_eq!(ty.kind, TagKind::Exception, "env.{name} must be exception tag");
+            assert_eq!(ty.params.as_ref(), &[Type::I32], "env.{name} params mismatch");
+        }
+    }
+
+
+    #[test]
+    fn can_instantiate_module_requiring_cpp_exception_tag_import() {
+        let mut store = Store::default();
+        let wasm = wasmer::wat2wasm(
+            br#"(module
+                (type (func (param i32)))
+                (import "env" "__cpp_exception" (tag (type 0)))
+            )"#,
+        )
+        .expect("valid wat");
+        let module = wasmer::Module::new(&store, wasm).expect("module compiles");
+
+        let mut imports = wasmer::Imports::new();
+        inject_eh_sjlj_tags(&mut imports, &mut store);
+
+        wasmer::Instance::new(&mut store, &module, &imports)
+            .expect("module with env.__cpp_exception should instantiate");
+    }
+}
