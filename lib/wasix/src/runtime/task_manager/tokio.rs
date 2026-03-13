@@ -326,7 +326,7 @@ impl VirtualTaskManager for TokioTaskManager {
     fn thread_parallelism(&self) -> Result<usize, WasiThreadError> {
         Ok(std::thread::available_parallelism()
             .map(usize::from)
-            .unwrap_or(8))
+            .unwrap_or(1))
     }
 }
 

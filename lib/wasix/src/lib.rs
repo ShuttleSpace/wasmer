@@ -77,7 +77,7 @@ pub use wasmer_wasix_types;
 
 use wasmer::{
     AsStoreMut, Exports, FunctionEnv, Imports, Memory32, MemoryAccessError, MemorySize,
-    RuntimeError, imports, namespace,
+    RuntimeError, Tag, Type, imports, namespace,
 };
 
 pub use virtual_fs;
@@ -377,8 +377,15 @@ pub fn generate_import_object_from_env(
     };
 
     imports.extend(&imports_wasi_generic);
+    inject_eh_sjlj_tags(&mut imports, store);
 
     imports
+}
+
+fn inject_eh_sjlj_tags(imports: &mut Imports, store: &mut impl AsStoreMut) {
+    // Clang emits these exception tags for setjmp/longjmp and C++ EH based flows.
+    imports.define("env", "__c_longjmp", Tag::new(store, vec![Type::I32]));
+    imports.define("env", "__cpp_exception", Tag::new(store, vec![Type::I32]));
 }
 
 fn wasi_exports_generic(mut store: &mut impl AsStoreMut, env: &FunctionEnv<WasiEnv>) -> Exports {
@@ -819,6 +826,8 @@ fn import_object_for_all_wasi_versions(
         "wasix_32v1" => exports_wasix_32v1,
         "wasix_64v1" => exports_wasix_64v1,
     };
+
+    inject_eh_sjlj_tags(&mut imports, store);
 
     imports
 }
