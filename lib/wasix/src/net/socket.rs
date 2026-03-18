@@ -770,9 +770,11 @@ impl InodeSocket {
                 _ => return Err(Errno::Inval),
             },
             InodeSocketKind::TcpStream { socket, .. } => match option {
-                WasiSocketOption::NoDelay => {
-                    socket.set_nodelay(val).map_err(net_error_into_wasi_err)?
-                }
+                WasiSocketOption::NoDelay => match socket.set_nodelay(val) {
+                    Ok(()) => {}
+                    Err(NetworkError::InvalidInput) | Err(NetworkError::Unsupported) => {}
+                    Err(err) => return Err(net_error_into_wasi_err(err)),
+                },
                 WasiSocketOption::KeepAlive => {
                     socket.set_keepalive(val).map_err(net_error_into_wasi_err)?
                 }

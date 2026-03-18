@@ -29,7 +29,7 @@ pub fn sock_send_to<M: MemorySize>(
 ) -> Result<Errno, WasiError> {
     WasiEnv::do_pending_operations(&mut ctx)?;
 
-    let (addr_ip, addr_port, use_write, enable_journal) = {
+    let (addr_ip, addr_port, use_write, enable_journal, fd_entry) = {
         let env = ctx.data();
         let memory = unsafe { env.memory_view(&ctx) };
         let (addr_ip, addr_port) = wasi_try_ok!(read_ip_port(&memory, addr));
@@ -37,28 +37,24 @@ pub fn sock_send_to<M: MemorySize>(
         let guard = fd_entry.inode.read();
         let use_write = matches!(guard.deref(), Kind::DuplexPipe { .. });
         drop(guard);
-        (addr_ip, addr_port, use_write, env.enable_journal)
+        (addr_ip, addr_port, use_write, env.enable_journal, fd_entry)
     };
     let addr = SocketAddr::new(addr_ip, addr_port);
     Span::current().record("addr", format!("{addr:?}"));
 
     let bytes_written = if use_write {
-        let offset = {
-            let env = ctx.data();
-            let state = env.state.clone();
-            let fd_entry = wasi_try_ok!(state.fs.get_fd(sock));
-            fd_entry.inner.offset.load(Ordering::Acquire) as usize
-        };
+        let offset = fd_entry.inner.offset.load(Ordering::Acquire) as usize;
         wasi_try_ok!(fd_write_internal::<M>(
             &mut ctx,
             sock,
+            fd_entry,
             FdWriteSource::Iovs {
                 iovs: si_data,
                 iovs_len: si_data_len
             },
             offset as u64,
             true,
-            enable_journal
+            enable_journal,
         )?)
     } else {
         wasi_try_ok!(sock_send_to_internal(
