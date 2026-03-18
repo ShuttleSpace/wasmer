@@ -1,9 +1,9 @@
 //! MSVC SEH implementation for Wasmer exceptions
-//! 
+//!
 //! Windows uses Structured Exception Handling (SEH) instead of libunwind.
 
-use std::ffi::c_void;
 use crate::{StoreObjects, VMContext, VMExceptionObj};
+use std::ffi::c_void;
 
 // Windows exception code for Wasmer exceptions
 const WASMER_EXCEPTION_CODE: u32 = 0xE0000001; // Custom exception code
@@ -45,7 +45,7 @@ enum EXCEPTION_DISPOSITION {
 }
 
 /// MSVC personality function
-/// 
+///
 /// # Safety
 /// Called by Windows SEH runtime during exception unwinding
 #[no_mangle]
@@ -59,17 +59,17 @@ pub unsafe extern "C" fn wasmer_eh_personality(
     if (*exception_record).exception_code != WASMER_EXCEPTION_CODE {
         return EXCEPTION_DISPOSITION::ExceptionContinueSearch;
     }
-    
+
     // Extract exnref from exception information
     let exnref = (*exception_record).exception_information[0] as u32;
-    
+
     // TODO: Match against catch handlers in landing pad
     // For now, continue searching
     EXCEPTION_DISPOSITION::ExceptionContinueSearch
 }
 
 /// Second stage personality function (Wasmer-specific)
-/// 
+///
 /// # Safety
 /// Called from landing pads
 pub unsafe fn wasmer_eh_personality2() {
@@ -77,20 +77,15 @@ pub unsafe fn wasmer_eh_personality2() {
 }
 
 /// Throw a Wasmer exception
-/// 
+///
 /// # Safety
 /// Performs unwinding, never returns
 pub unsafe fn throw(_ctx: &StoreObjects, exnref: u32) -> ! {
     #[link(name = "kernel32")]
     extern "system" {
-        fn RaiseException(
-            code: u32,
-            flags: u32,
-            num_args: u32,
-            args: *const usize,
-        ) -> !;
+        fn RaiseException(code: u32, flags: u32, num_args: u32, args: *const usize) -> !;
     }
-    
+
     let args = [exnref as usize];
     RaiseException(
         WASMER_EXCEPTION_CODE,
@@ -101,7 +96,7 @@ pub unsafe fn throw(_ctx: &StoreObjects, exnref: u32) -> ! {
 }
 
 /// Read exnref from exception object
-/// 
+///
 /// # Safety
 /// `exception` must be a valid EXCEPTION_RECORD pointer
 pub unsafe fn read_exnref(exception: *mut c_void) -> u32 {
@@ -110,7 +105,7 @@ pub unsafe fn read_exnref(exception: *mut c_void) -> u32 {
 }
 
 /// Delete exception object
-/// 
+///
 /// # Safety
 /// `exception` must be a valid exception pointer
 pub unsafe fn delete_exception(_exception: *mut c_void) {

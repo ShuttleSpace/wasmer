@@ -39,8 +39,8 @@ use wasmer_compiler::types::unwind::CompiledFunctionUnwindInfo;
 use wasmer_types::target::CallingConvention;
 use wasmer_types::{
     CompileError, FunctionIndex, FunctionType, GlobalIndex, LocalFunctionIndex, LocalMemoryIndex,
-    MemoryIndex, MemoryStyle, ModuleInfo, SignatureIndex, TableIndex, TableStyle, TagIndex, TrapCode, Type,
-    VMBuiltinFunctionIndex, VMOffsets,
+    MemoryIndex, MemoryStyle, ModuleInfo, SignatureIndex, TableIndex, TableStyle, TagIndex,
+    TrapCode, Type, VMBuiltinFunctionIndex, VMOffsets,
     entity::{EntityRef, PrimaryMap},
 };
 
@@ -227,7 +227,8 @@ fn type_to_wp_type(ty: &Type) -> WpType {
                     ty: wasmer_compiler::wasmparser::AbstractHeapType::Exn,
                     shared: false,
                 },
-            ).unwrap()
+            )
+            .unwrap(),
         ),
     }
 }
@@ -2520,7 +2521,7 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     param_types,
                     return_types,
                     value_stack_depth: self.value_stack.len(),
-            exception_handlers: vec![],
+                    exception_handlers: vec![],
                 };
                 self.control_stack.push(frame);
                 self.machine.jmp_on_condition(
@@ -2627,7 +2628,7 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     param_types,
                     return_types,
                     value_stack_depth: self.value_stack.len(),
-            exception_handlers: vec![],
+                    exception_handlers: vec![],
                 };
                 self.control_stack.push(frame);
             }
@@ -2650,7 +2651,7 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     param_types: param_types.clone(),
                     return_types: return_types.clone(),
                     value_stack_depth: self.value_stack.len(),
-            exception_handlers: vec![],
+                    exception_handlers: vec![],
                 });
 
                 // For proper PHI implementation, we must copy pre-loop params to PHI params.
@@ -3511,24 +3512,25 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                 let sig_idx = self.module.tags[tag_idx];
                 let tag_type = self.module.signatures.get(sig_idx).unwrap();
                 let param_count = tag_type.params().len();
-                
+
                 // Pop exception parameters from stack
                 let _params: SmallVec<[_; 8]> = self
                     .value_stack
                     .drain(self.value_stack.len() - param_count..)
                     .collect();
-                
+
                 // Check if there's a matching catch handler in the control stack
                 // Optimized: use early return instead of break
-                let catch_info = self.control_stack.iter().rev()
-                    .find_map(|frame| {
-                        frame.exception_handlers.iter()
-                            .find(|(handler_tag, _, _)| {
-                                handler_tag.is_none() || *handler_tag == Some(tag_index)
-                            })
-                            .map(|(tag, label, has_ref)| (*tag, *label, *has_ref))
-                    });
-                
+                let catch_info = self.control_stack.iter().rev().find_map(|frame| {
+                    frame
+                        .exception_handlers
+                        .iter()
+                        .find(|(handler_tag, _, _)| {
+                            handler_tag.is_none() || *handler_tag == Some(tag_index)
+                        })
+                        .map(|(tag, label, has_ref)| (*tag, *label, *has_ref))
+                });
+
                 if let Some((_matched_tag, label, _has_ref)) = catch_info {
                     // For local catch, we don't need to allocate exception
                     // Just jump to the handler
@@ -3540,13 +3542,13 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                         Size::S64,
                         Location::Memory(
                             self.machine.get_vmctx_reg(),
-                            self.vmoffsets
-                                .vmctx_builtin_function(VMBuiltinFunctionIndex::get_alloc_exception_index())
-                                as i32,
+                            self.vmoffsets.vmctx_builtin_function(
+                                VMBuiltinFunctionIndex::get_alloc_exception_index(),
+                            ) as i32,
                         ),
                         Location::GPR(self.machine.get_gpr_for_call()),
                     )?;
-                    
+
                     self.emit_call_native(
                         |this| {
                             this.machine
@@ -3554,16 +3556,10 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                         },
                         [
                             (
-                                Location::Memory(
-                                    self.machine.get_vmctx_reg(),
-                                    0,
-                                ),
+                                Location::Memory(self.machine.get_vmctx_reg(), 0),
                                 CanonicalizeType::None,
                             ),
-                            (
-                                Location::Imm32(tag_index),
-                                CanonicalizeType::None,
-                            ),
+                            (Location::Imm32(tag_index), CanonicalizeType::None),
                         ]
                         .iter()
                         .cloned(),
@@ -3572,13 +3568,13 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                         NativeCallType::Unreachable,
                     )?;
                 }
-                
+
                 self.unreachable_depth = 1;
             }
             Operator::ThrowRef => {
                 // Pop exnref from stack
                 let (exnref_loc, _) = self.pop_value_released()?;
-                
+
                 // Call throw(ctx, exnref) -> !
                 self.machine.move_location(
                     Size::S64,
@@ -3590,7 +3586,7 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     ),
                     Location::GPR(self.machine.get_gpr_for_call()),
                 )?;
-                
+
                 self.emit_call_native(
                     |this| {
                         this.machine
@@ -3599,16 +3595,10 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     // [vmctx, exnref]
                     [
                         (
-                            Location::Memory(
-                                self.machine.get_vmctx_reg(),
-                                0,
-                            ),
+                            Location::Memory(self.machine.get_vmctx_reg(), 0),
                             CanonicalizeType::None,
                         ),
-                        (
-                            exnref_loc,
-                            CanonicalizeType::None,
-                        ),
+                        (exnref_loc, CanonicalizeType::None),
                     ]
                     .iter()
                     .cloned(),
@@ -3616,7 +3606,7 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     iter::empty(),
                     NativeCallType::Unreachable,
                 )?;
-                
+
                 self.unreachable_depth = 1;
             }
             Operator::Try { blockty: _ } => {
@@ -3652,26 +3642,28 @@ impl<'a, M: Machine> FuncGen<'a, M> {
             }
             Operator::TryTable { try_table } => {
                 let (params, results) = self.blocktype_params_results(&try_table.ty)?;
-                
+
                 // Pop parameters from stack
                 let param_values: SmallVec<[_; 8]> = self
                     .value_stack
                     .drain(self.value_stack.len() - params.len()..)
                     .collect();
-                
+
                 // Create labels for catch handlers
                 let mut exception_handlers = Vec::new();
                 for catch in try_table.catches.iter() {
                     let catch_label = self.machine.get_label();
                     let (tag_index, has_ref) = match catch {
                         wasmer_compiler::wasmparser::Catch::One { tag, .. } => (Some(*tag), false),
-                        wasmer_compiler::wasmparser::Catch::OneRef { tag, .. } => (Some(*tag), true),
+                        wasmer_compiler::wasmparser::Catch::OneRef { tag, .. } => {
+                            (Some(*tag), true)
+                        }
                         wasmer_compiler::wasmparser::Catch::All { .. } => (None, false),
                         wasmer_compiler::wasmparser::Catch::AllRef { .. } => (None, true),
                     };
                     exception_handlers.push((tag_index, catch_label, has_ref));
                 }
-                
+
                 // Create control frame
                 let label = self.machine.get_label();
                 let frame = ControlFrame {
@@ -3682,9 +3674,9 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     value_stack_depth: self.value_stack.len(),
                     exception_handlers,
                 };
-                
+
                 self.control_stack.push(frame);
-                
+
                 // Push parameters back as block inputs
                 for val in param_values.into_iter() {
                     self.value_stack.push(val);
@@ -3877,16 +3869,16 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                     if let ControlState::If { label_else, .. } = frame.state {
                         self.machine.emit_label(label_else)?;
                     }
-                    
+
                     // Emit catch handler labels for try_table
                     for (tag_index, catch_label, has_ref) in frame.exception_handlers.iter() {
                         self.machine.emit_label(*catch_label)?;
-                        
+
                         // Extract payload parameters if we have a specific tag
                         if let Some(tag_idx) = tag_index {
                             let sig_idx = self.module.tags[TagIndex::from_u32(*tag_idx)];
                             let tag_type = self.module.signatures.get(sig_idx).unwrap();
-                            
+
                             // Push payload parameters to stack
                             // Note: These are the exception parameters that were passed to throw
                             // In a full implementation, we would extract them from the exception object
@@ -3898,7 +3890,7 @@ impl<'a, M: Machine> FuncGen<'a, M> {
                                 self.value_stack.push((loc, CanonicalizeType::None));
                             }
                         }
-                        
+
                         // If catch_ref, push exnref to stack
                         if *has_ref {
                             let loc = self.acquire_location(&WpType::I32)?;

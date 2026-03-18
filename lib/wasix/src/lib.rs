@@ -960,11 +960,18 @@ mod eh_import_tests {
             };
 
             let ty = tag.ty(&store);
-            assert_eq!(ty.kind, TagKind::Exception, "env.{name} must be exception tag");
-            assert_eq!(ty.params.as_ref(), &[Type::I32], "env.{name} params mismatch");
+            assert_eq!(
+                ty.kind,
+                TagKind::Exception,
+                "env.{name} must be exception tag"
+            );
+            assert_eq!(
+                ty.params.as_ref(),
+                &[Type::I32],
+                "env.{name} params mismatch"
+            );
         }
     }
-
 
     #[test]
     fn can_instantiate_module_requiring_cpp_exception_tag_import() {
