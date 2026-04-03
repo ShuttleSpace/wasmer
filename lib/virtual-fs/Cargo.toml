@@ -41,6 +41,7 @@ serde = { workspace = true, default-features = false, features = [
 	"derive",
 ], optional = true }
 getrandom.workspace = true
+zip = { workspace = true, default-features = false, features = ["deflate"] }
 web-time = { workspace = true, optional = true }
 
 [dev-dependencies]

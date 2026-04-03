@@ -36,6 +36,7 @@ pub mod special_file;
 pub mod tmp_fs;
 pub mod union_fs;
 pub mod zero_file;
+pub mod zip_fs;
 // tty_file -> see wasmer_wasi::tty_file
 mod filesystems;
 pub(crate) mod ops;
@@ -72,6 +73,7 @@ pub use union_fs::*;
 #[cfg(feature = "webc-fs")]
 pub use webc_volume_fs::WebcVolumeFileSystem;
 pub use zero_file::*;
+pub use zip_fs::ZipArchiveFileSystem;
 
 pub type Result<T> = std::result::Result<T, FsError>;
 
