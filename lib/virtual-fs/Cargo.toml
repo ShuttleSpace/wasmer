@@ -42,7 +42,14 @@ serde = { workspace = true, default-features = false, features = [
 ], optional = true }
 getrandom.workspace = true
 zip = { workspace = true, default-features = false, features = ["deflate"] }
+flate2.workspace = true
+tar.workspace = true
+lzma-rs.workspace = true
 web-time = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sevenz-rust2 = { version = "0.20.2", default-features = true }
+unrar = "0.5.8"
 
 [dev-dependencies]
 pretty_assertions.workspace = true
