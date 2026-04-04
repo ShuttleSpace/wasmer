@@ -118,11 +118,11 @@ impl ArchiveFileSystem {
                 }
             }
             ArchiveFormat::Rar => {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(any(target_arch = "wasm32", target_vendor = "apple"))]
                 {
                     return Err(FsError::Unsupported);
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(all(not(target_arch = "wasm32"), not(target_vendor = "apple")))]
                 {
                 let fs = IndexedArchiveFileSystem::from_rar_path(path)?;
                 Ok(Self {
@@ -313,7 +313,7 @@ impl IndexedArchiveFileSystem {
         Ok(fs)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(target_vendor = "apple")))]
     fn from_rar_path(path: &Path) -> Result<Self, FsError> {
         let mut fs = Self::empty();
 
@@ -608,7 +608,7 @@ fn map_7z_error(error: sevenz_rust2::Error) -> FsError {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_vendor = "apple")))]
 fn map_unrar_error(error: unrar::error::UnrarError) -> FsError {
     use unrar::error::Code;
 
