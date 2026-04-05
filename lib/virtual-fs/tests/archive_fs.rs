@@ -144,7 +144,7 @@ async fn reads_targz_archive() {
 
     let err = fs
         .new_open_options()
-        .write(true)
+        .append(true)
         .open("/lib/python/__init__.py")
         .unwrap_err();
     assert_eq!(err, FsError::PermissionDenied);

@@ -15,9 +15,13 @@ pub use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::Metadata;
 use std::{
+    collections::HashMap,
     ffi::{OsStr, OsString},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use self::offloaded_file::OffloadedFile;
@@ -73,6 +77,7 @@ struct DirectoryNode {
     inode: Inode,
     name: OsString,
     children: Vec<Inode>,
+    child_by_name: HashMap<OsString, Inode>,
     metadata: Metadata,
 }
 
@@ -179,4 +184,53 @@ fn time() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos() as u64
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PerfCounters {
+    pub open_total: u64,
+    pub open_arcfile_total: u64,
+    pub lazy_arc_open_total: u64,
+    pub lazy_arc_open_error_total: u64,
+    pub lazy_arc_open_elapsed_ns: u64,
+}
+
+static PERF_OPEN_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PERF_OPEN_ARCFILE_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PERF_LAZY_ARC_OPEN_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PERF_LAZY_ARC_OPEN_ERROR_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PERF_LAZY_ARC_OPEN_ELAPSED_NS: AtomicU64 = AtomicU64::new(0);
+
+pub fn reset_perf_counters() {
+    PERF_OPEN_TOTAL.store(0, Ordering::Relaxed);
+    PERF_OPEN_ARCFILE_TOTAL.store(0, Ordering::Relaxed);
+    PERF_LAZY_ARC_OPEN_TOTAL.store(0, Ordering::Relaxed);
+    PERF_LAZY_ARC_OPEN_ERROR_TOTAL.store(0, Ordering::Relaxed);
+    PERF_LAZY_ARC_OPEN_ELAPSED_NS.store(0, Ordering::Relaxed);
+}
+
+pub fn snapshot_perf_counters() -> PerfCounters {
+    PerfCounters {
+        open_total: PERF_OPEN_TOTAL.load(Ordering::Relaxed),
+        open_arcfile_total: PERF_OPEN_ARCFILE_TOTAL.load(Ordering::Relaxed),
+        lazy_arc_open_total: PERF_LAZY_ARC_OPEN_TOTAL.load(Ordering::Relaxed),
+        lazy_arc_open_error_total: PERF_LAZY_ARC_OPEN_ERROR_TOTAL.load(Ordering::Relaxed),
+        lazy_arc_open_elapsed_ns: PERF_LAZY_ARC_OPEN_ELAPSED_NS.load(Ordering::Relaxed),
+    }
+}
+
+pub(super) fn perf_inc_open_total() {
+    PERF_OPEN_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(super) fn perf_inc_open_arcfile_total() {
+    PERF_OPEN_ARCFILE_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(super) fn perf_inc_lazy_arc_open(elapsed_ns: u64, ok: bool) {
+    PERF_LAZY_ARC_OPEN_TOTAL.fetch_add(1, Ordering::Relaxed);
+    PERF_LAZY_ARC_OPEN_ELAPSED_NS.fetch_add(elapsed_ns, Ordering::Relaxed);
+    if !ok {
+        PERF_LAZY_ARC_OPEN_ERROR_TOTAL.fetch_add(1, Ordering::Relaxed);
+    }
 }

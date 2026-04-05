@@ -72,6 +72,7 @@ impl FileHandle {
 
     fn lazy_load_arc_file_mut(&mut self) -> Result<&mut dyn VirtualFile> {
         if self.arc_file.is_none() {
+            let lazy_open_start = std::time::Instant::now();
             let fs = match self.filesystem.inner.read() {
                 Ok(fs) => fs,
                 _ => return Err(FsError::EntryNotFound),
@@ -80,14 +81,18 @@ impl FileHandle {
             let inode = fs.storage.get(self.inode);
             match inode {
                 Some(Node::ArcFile(node)) => {
-                    self.arc_file.replace(
-                        node.fs
-                            .new_open_options()
-                            .read(self.readable)
-                            .write(self.writable)
-                            .append(self.append_mode)
-                            .open(node.path.as_path()),
+                    let open_result = node
+                        .fs
+                        .new_open_options()
+                        .read(self.readable)
+                        .write(self.writable)
+                        .append(self.append_mode)
+                        .open(node.path.as_path());
+                    perf_inc_lazy_arc_open(
+                        lazy_open_start.elapsed().as_nanos() as u64,
+                        open_result.is_ok(),
                     );
+                    self.arc_file.replace(open_result);
                 }
                 _ => return Err(FsError::EntryNotFound),
             }
@@ -182,15 +187,7 @@ impl VirtualFile for FileHandle {
             }
             Some(Node::ArcFile(node)) => match self.arc_file.as_ref() {
                 Some(file) => file.as_ref().map(|file| file.size()).unwrap_or(0),
-                None => node
-                    .fs
-                    .new_open_options()
-                    .read(self.readable)
-                    .write(self.writable)
-                    .append(self.append_mode)
-                    .open(node.path.as_path())
-                    .map(|file| file.size())
-                    .unwrap_or(0),
+                None => node.metadata.len,
             },
             _ => 0,
         }

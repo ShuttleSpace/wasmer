@@ -327,7 +327,8 @@ impl crate::FileOpener for FileSystem {
         path: &Path,
         conf: &OpenOptionsConfig,
     ) -> Result<Box<dyn VirtualFile + Send + Sync + 'static>> {
-        debug!(path=%path.display(), "open");
+        trace!(path=%path.display(), "open");
+        perf_inc_open_total();
 
         let read = conf.read();
         let mut write = conf.write();
@@ -446,29 +447,35 @@ impl crate::FileOpener for FileSystem {
                     }
 
                     Some(Node::ArcFile(node)) => {
+                        perf_inc_open_arcfile_total();
                         // Update the accessed time.
                         node.metadata.accessed = time();
+                        // Fast path for read-mostly open: avoid opening the
+                        // underlying referenced FS here. The actual file is
+                        // lazily opened by `FileHandle` when first accessed.
+                        //
+                        // Keep strict behavior for mutating open semantics by
+                        // still validating append/truncate paths against the
+                        // underlying FS.
+                        if truncate || append {
+                            let mut file = node
+                                .fs
+                                .new_open_options()
+                                .read(read)
+                                .write(write)
+                                .append(append)
+                                .truncate(truncate)
+                                .create(create)
+                                .create_new(create_new)
+                                .open(node.path.as_path())?;
 
-                        let mut file = node
-                            .fs
-                            .new_open_options()
-                            .read(read)
-                            .write(write)
-                            .append(append)
-                            .truncate(truncate)
-                            .create(create)
-                            .create_new(create_new)
-                            .open(node.path.as_path())?;
-
-                        // Truncate if needed.
-                        if truncate {
-                            file.set_len(0)?;
-                            node.metadata.len = 0;
-                        }
-
-                        // Move the cursor to the end if needed.
-                        if append {
-                            cursor = file.size();
+                            if truncate {
+                                file.set_len(0)?;
+                                node.metadata.len = 0;
+                            }
+                            if append {
+                                cursor = file.size();
+                            }
                         }
                     }
 

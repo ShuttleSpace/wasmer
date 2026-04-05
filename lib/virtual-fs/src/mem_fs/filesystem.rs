@@ -6,8 +6,7 @@ use super::*;
 use crate::{DirEntry, FileType, FsError, Metadata, OpenOptions, ReadDir, Result};
 use futures::future::{BoxFuture, Either};
 use slab::Slab;
-use std::collections::VecDeque;
-use std::convert::identity;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
@@ -432,6 +431,7 @@ impl crate::FileSystem for FileSystem {
                 inode: inode_of_directory,
                 name: name_of_directory,
                 children: Vec::new(),
+                child_by_name: HashMap::new(),
                 metadata: {
                     let time = time();
 
@@ -622,7 +622,7 @@ impl crate::FileSystem for FileSystem {
                         }
 
                         // Update the file name, and update the modified time.
-                        fs.update_node_name(inode, name_of_to)?;
+                        fs.update_node_name(inode, name_of_to.clone())?;
 
                         // The parents are different. Let's update them.
                         if inode_of_from_parent != inode_of_to_parent {
@@ -636,12 +636,11 @@ impl crate::FileSystem for FileSystem {
                         }
                         // Otherwise, we need to at least update the modified time of the parent.
                         else {
-                            let mut inode = fs.storage.get_mut(inode_of_from_parent);
-                            match inode.as_mut() {
-                                Some(Node::Directory(node)) => node.metadata.modified = time(),
-                                Some(Node::ArcDirectory(node)) => node.metadata.modified = time(),
-                                _ => return Err(FsError::UnknownError),
-                            }
+                            fs.rename_child_in_node(
+                                inode_of_from_parent,
+                                &name_of_from,
+                                &name_of_to,
+                            )?;
                         }
                     }
 
@@ -833,11 +832,12 @@ impl FileSystemInner {
 
         while let Some(component) = components.next() {
             node = match node {
-                Node::Directory(DirectoryNode { children, .. }) => children
-                    .iter()
-                    .filter_map(|inode| self.storage.get(*inode))
-                    .find(|node| node.name() == component.as_os_str())
-                    .ok_or(FsError::EntryNotFound)?,
+                Node::Directory(DirectoryNode { child_by_name, .. }) => {
+                    let inode = child_by_name
+                        .get(component.as_os_str())
+                        .ok_or(FsError::EntryNotFound)?;
+                    self.storage.get(*inode).ok_or(FsError::EntryNotFound)?
+                }
                 Node::ArcDirectory(ArcDirectoryNode {
                     fs, path: fs_path, ..
                 }) => {
@@ -884,32 +884,38 @@ impl FileSystemInner {
         directory_must_be_empty: DirectoryMustBeEmpty,
     ) -> Result<(usize, InodeResolution)> {
         match self.storage.get(inode_of_parent) {
-            Some(Node::Directory(DirectoryNode { children, .. })) => children
-                .iter()
-                .enumerate()
-                .filter_map(|(nth, inode)| self.storage.get(*inode).map(|node| (nth, node)))
-                .find_map(|(nth, node)| match node {
+            Some(Node::Directory(DirectoryNode {
+                children,
+                child_by_name,
+                ..
+            })) => {
+                let inode = match child_by_name.get(name_of_directory) {
+                    Some(inode) => *inode,
+                    None => return Err(FsError::InvalidInput),
+                };
+                let node = self.storage.get(inode).ok_or(FsError::InvalidInput)?;
+                let nth = children
+                    .iter()
+                    .position(|candidate| *candidate == inode)
+                    .unwrap_or(0);
+                match node {
                     Node::Directory(DirectoryNode {
                         inode,
-                        name,
                         children,
                         ..
-                    }) if name.as_os_str() == name_of_directory => {
+                    }) => {
                         if directory_must_be_empty.no() || children.is_empty() {
-                            Some(Ok((nth, InodeResolution::Found(*inode))))
+                            Ok((nth, InodeResolution::Found(*inode)))
                         } else {
-                            Some(Err(FsError::DirectoryNotEmpty))
+                            Err(FsError::DirectoryNotEmpty)
                         }
                     }
-                    Node::ArcDirectory(ArcDirectoryNode { name, fs, path, .. })
-                        if name.as_os_str() == name_of_directory =>
-                    {
-                        Some(Ok((0, InodeResolution::Redirect(fs.clone(), path.clone()))))
+                    Node::ArcDirectory(ArcDirectoryNode { fs, path, .. }) => {
+                        Ok((nth, InodeResolution::Redirect(fs.clone(), path.clone())))
                     }
-                    _ => None,
-                })
-                .ok_or(FsError::InvalidInput)
-                .and_then(identity), // flatten
+                    _ => Err(FsError::InvalidInput),
+                }
+            }
 
             Some(Node::ArcDirectory(ArcDirectoryNode {
                 fs, path: fs_path, ..
@@ -931,25 +937,33 @@ impl FileSystemInner {
         name_of_file: &OsString,
     ) -> Result<Option<(usize, InodeResolution)>> {
         match self.storage.get(inode_of_parent) {
-            Some(Node::Directory(DirectoryNode { children, .. })) => children
-                .iter()
-                .enumerate()
-                .filter_map(|(nth, inode)| self.storage.get(*inode).map(|node| (nth, node)))
-                .find_map(|(nth, node)| match node {
-                    Node::File(FileNode { inode, name, .. })
-                    | Node::OffloadedFile(OffloadedFileNode { inode, name, .. })
-                    | Node::ReadOnlyFile(ReadOnlyFileNode { inode, name, .. })
-                    | Node::CustomFile(CustomFileNode { inode, name, .. })
-                    | Node::ArcFile(ArcFileNode { inode, name, .. })
-                    | Node::Symlink(SymlinkNode { inode, name, .. })
-                        if name.as_os_str() == name_of_file =>
-                    {
-                        Some(Some((nth, InodeResolution::Found(*inode))))
+            Some(Node::Directory(DirectoryNode {
+                children,
+                child_by_name,
+                ..
+            })) => {
+                let Some(inode) = child_by_name.get(name_of_file).copied() else {
+                    return Ok(None);
+                };
+                let Some(node) = self.storage.get(inode) else {
+                    return Err(FsError::InvalidInput);
+                };
+                let nth = children
+                    .iter()
+                    .position(|candidate| *candidate == inode)
+                    .unwrap_or(0);
+                match node {
+                    Node::File(FileNode { inode, .. })
+                    | Node::OffloadedFile(OffloadedFileNode { inode, .. })
+                    | Node::ReadOnlyFile(ReadOnlyFileNode { inode, .. })
+                    | Node::CustomFile(CustomFileNode { inode, .. })
+                    | Node::ArcFile(ArcFileNode { inode, .. })
+                    | Node::Symlink(SymlinkNode { inode, .. }) => {
+                        Ok(Some((nth, InodeResolution::Found(*inode))))
                     }
-                    _ => None,
-                })
-                .or(Some(None))
-                .ok_or(FsError::InvalidInput),
+                    _ => Ok(None),
+                }
+            }
 
             Some(Node::ArcDirectory(ArcDirectoryNode {
                 fs, path: fs_path, ..
@@ -972,25 +986,34 @@ impl FileSystemInner {
         name_of: &OsString,
     ) -> Result<Option<(usize, InodeResolution)>> {
         match self.storage.get(inode_of_parent) {
-            Some(Node::Directory(DirectoryNode { children, .. })) => children
-                .iter()
-                .enumerate()
-                .filter_map(|(nth, inode)| self.storage.get(*inode).map(|node| (nth, node)))
-                .find_map(|(nth, node)| match node {
-                    Node::File(FileNode { inode, name, .. })
-                    | Node::OffloadedFile(OffloadedFileNode { inode, name, .. })
-                    | Node::Directory(DirectoryNode { inode, name, .. })
-                    | Node::ReadOnlyFile(ReadOnlyFileNode { inode, name, .. })
-                    | Node::CustomFile(CustomFileNode { inode, name, .. })
-                    | Node::ArcFile(ArcFileNode { inode, name, .. })
-                        if name.as_os_str() == name_of =>
-                    {
-                        Some(Some((nth, InodeResolution::Found(*inode))))
+            Some(Node::Directory(DirectoryNode {
+                children,
+                child_by_name,
+                ..
+            })) => {
+                let Some(inode) = child_by_name.get(name_of).copied() else {
+                    return Ok(None);
+                };
+                let Some(node) = self.storage.get(inode) else {
+                    return Err(FsError::InvalidInput);
+                };
+                let nth = children
+                    .iter()
+                    .position(|candidate| *candidate == inode)
+                    .unwrap_or(0);
+                match node {
+                    Node::File(FileNode { inode, .. })
+                    | Node::OffloadedFile(OffloadedFileNode { inode, .. })
+                    | Node::Directory(DirectoryNode { inode, .. })
+                    | Node::ReadOnlyFile(ReadOnlyFileNode { inode, .. })
+                    | Node::CustomFile(CustomFileNode { inode, .. })
+                    | Node::ArcFile(ArcFileNode { inode, .. })
+                    | Node::Symlink(SymlinkNode { inode, .. }) => {
+                        Ok(Some((nth, InodeResolution::Found(*inode))))
                     }
-                    _ => None,
-                })
-                .or(Some(None))
-                .ok_or(FsError::InvalidInput),
+                    _ => Ok(None),
+                }
+            }
 
             Some(Node::ArcDirectory(ArcDirectoryNode {
                 fs, path: fs_path, ..
@@ -1014,6 +1037,32 @@ impl FileSystemInner {
         Ok(())
     }
 
+    pub(super) fn rename_child_in_node(
+        &mut self,
+        inode: Inode,
+        old_name: &OsString,
+        new_name: &OsString,
+    ) -> Result<()> {
+        match self.storage.get_mut(inode) {
+            Some(Node::Directory(DirectoryNode {
+                child_by_name,
+                metadata: Metadata { modified, .. },
+                ..
+            })) => {
+                if let Some(child_inode) = child_by_name.remove(old_name) {
+                    child_by_name.insert(new_name.clone(), child_inode);
+                }
+                *modified = time();
+                Ok(())
+            }
+            Some(Node::ArcDirectory(ArcDirectoryNode { metadata, .. })) => {
+                metadata.modified = time();
+                Ok(())
+            }
+            _ => Err(FsError::UnknownError),
+        }
+    }
+
     /// Add a child to a directory node represented by `inode`.
     ///
     /// This function also updates the modified time of the directory.
@@ -1022,13 +1071,21 @@ impl FileSystemInner {
     ///
     /// `inode` must represents an existing directory.
     pub(super) fn add_child_to_node(&mut self, inode: Inode, new_child: Inode) -> Result<()> {
+        let child_name = self
+            .storage
+            .get(new_child)
+            .ok_or(FsError::UnknownError)?
+            .name()
+            .to_os_string();
         match self.storage.get_mut(inode) {
             Some(Node::Directory(DirectoryNode {
                 children,
+                child_by_name,
                 metadata: Metadata { modified, .. },
                 ..
             })) => {
                 children.push(new_child);
+                child_by_name.insert(child_name, new_child);
                 *modified = time();
 
                 Ok(())
@@ -1049,10 +1106,12 @@ impl FileSystemInner {
         match self.storage.get_mut(inode) {
             Some(Node::Directory(DirectoryNode {
                 children,
+                child_by_name,
                 metadata: Metadata { modified, .. },
                 ..
             })) => {
-                children.remove(position);
+                let removed_inode = children.remove(position);
+                child_by_name.retain(|_, inode| *inode != removed_inode);
                 *modified = time();
 
                 Ok(())
@@ -1189,6 +1248,7 @@ impl Default for FileSystemInner {
             inode: ROOT_INODE,
             name: OsString::from("/"),
             children: Vec::new(),
+            child_by_name: HashMap::new(),
             metadata: Metadata {
                 ft: FileType {
                     dir: true,
